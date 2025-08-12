@@ -1,0 +1,50 @@
+name: Update Kiro Versions
+
+on:
+  schedule:
+    # Run every 5 hours
+    - cron: '0 */5 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Create data directory
+        run: mkdir -p data
+      
+      - name: Run version update script
+        run: node script/index.js
+      
+      - name: Check for changes
+        id: git-check
+        run: |
+          git diff --exit-code || echo "changed=true" >> $GITHUB_OUTPUT
+      
+      - name: Commit and push changes
+        if: steps.git-check.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git commit -m "🔄 Auto-update: Kiro versions updated
+
+          🤖 Generated with GitHub Actions
+          
+          Co-Authored-By: GitHub Action <noreply@github.com>"
+          git push
