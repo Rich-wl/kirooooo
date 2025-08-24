@@ -27,6 +27,8 @@ jobs:
         run: pnpm install
       
       - name: Build project
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: pnpm build
       
       - name: Create deployment package
@@ -89,6 +91,11 @@ jobs:
             # Extract new deployment
             tar -xzf /tmp/deployment.tar.gz
             rm /tmp/deployment.tar.gz
+            
+            # Create .env.production file with secrets
+            cat > .env.production << EOF
+            RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
+            EOF
             
             # Install production dependencies only
             pnpm install --prod --frozen-lockfile
