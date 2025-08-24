@@ -1,0 +1,100 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: latest
+      
+      - name: Install dependencies
+        run: pnpm install
+      
+      - name: Build project
+        run: pnpm build
+      
+      - name: Create deployment package
+        run: |
+          # Create deployment directory
+          mkdir -p deployment
+          
+          # Copy only necessary files
+          cp -r .next deployment/
+          cp -r public deployment/ 2>/dev/null || true
+          cp package.json deployment/
+          cp pnpm-lock.yaml deployment/
+          cp next.config.* deployment/ 2>/dev/null || true
+          
+          # Create minimal package.json for production
+          node -e "
+          const pkg = require('./package.json');
+          const prodPkg = {
+            name: pkg.name,
+            version: pkg.version,
+            scripts: {
+              start: pkg.scripts.start
+            },
+            dependencies: pkg.dependencies
+          };
+          require('fs').writeFileSync('./deployment/package.json', JSON.stringify(prodPkg, null, 2));
+          "
+          
+          # Create tarball
+          tar -czf deployment.tar.gz -C deployment .
+      
+      - name: Upload deployment package to VPS
+        uses: appleboy/scp-action@v0.1.5
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: "deployment.tar.gz"
+          target: "/tmp"
+      
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          script: |
+            # Create project directory if needed
+            mkdir -p /var/www/website/kiro
+            cd /var/www/website/kiro
+            
+            # Backup current deployment
+            if [ -d .next ]; then
+              rm -rf .next.backup
+              mv .next .next.backup
+            fi
+            
+            # Extract new deployment
+            tar -xzf /tmp/deployment.tar.gz
+            rm /tmp/deployment.tar.gz
+            
+            # Install production dependencies only
+            pnpm install --prod --frozen-lockfile
+            
+            # Restart application with PM2 on port 3006
+            pm2 restart kiro-downloads || PORT=3006 pm2 start pnpm --name "kiro-downloads" -- start
+            pm2 save
+            
+            echo "✅ Deployment successful!"
